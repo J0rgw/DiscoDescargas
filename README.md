@@ -3,7 +3,8 @@
 
 ¡Bienvenido/a a la pista, crack! Esta herramienta descarga música de YouTube y la guarda en tu ordenador como **MP3** o **WAV**. Sin anuncios, sin suscripciones, sin cuentas. Solo tú, los enlaces y el boogie.
 
-> **Nota legal:** Descarga únicamente música de la que tengas derecho. Respeta a los artistas, que ellos también tienen que pagar el alquiler.
+> **Nota legal:**No uses las descargas para usos ilegales ni revendas la musica. Respeta a los artistas, que ellos también tienen que pagar el alquiler.
+> Esto es un proyecto para jugar a un juego de ritmo con mis canciones favoritas
 
 ---
 
