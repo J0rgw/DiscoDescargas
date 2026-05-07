@@ -29,21 +29,74 @@ _jobs: dict = {}
 _lock = threading.Lock()
 
 
+def _analyze_bpm(filepath: str) -> float | None:
+    try:
+        import librosa
+        y, sr = librosa.load(filepath, sr=22050, mono=True)
+        tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+        bpm = float(tempo[0]) if hasattr(tempo, '__len__') else float(tempo)
+        return round(bpm, 1)
+    except Exception:
+        return None
+
+
+def _embed_bpm(filepath: str, bpm: float) -> None:
+    try:
+        if filepath.lower().endswith('.mp3'):
+            from mutagen.mp3 import MP3
+            from mutagen.id3 import ID3, TBPM
+            audio = MP3(filepath, ID3=ID3)
+            if audio.tags is None:
+                audio.add_tags()
+            audio.tags.add(TBPM(encoding=3, text=str(int(bpm))))
+            audio.save()
+    except Exception:
+        pass
+
+
 def _download(run_id: str, idx: int, url: str, fmt: str, full_playlist: bool) -> None:
     with _lock:
         _jobs[run_id]['tracks'][idx]['status'] = 'running'
     try:
-        cmd = ['yt-dlp']
+        cmd = ['yt-dlp', '--print', 'after_move:%(filepath)s']
         if not full_playlist:
             cmd.append('--no-playlist')
         cmd += ['-x', '--audio-format', fmt, '--audio-quality', '0',
                 '-o', str(MUSIC_DIR / '%(title)s.%(ext)s'), url]
         r = subprocess.run(cmd, capture_output=True, text=True)
-        with _lock:
-            t = _jobs[run_id]['tracks'][idx]
-            if r.returncode == 0:
-                t['status'] = 'done'
+
+        if r.returncode == 0:
+            # --print outputs one filepath per track to stdout
+            filepaths = [l.strip() for l in r.stdout.splitlines()
+                         if l.strip() and Path(l.strip()).is_file()]
+
+            if filepaths:
+                with _lock:
+                    _jobs[run_id]['tracks'][idx]['status'] = 'analyzing'
+                    _jobs[run_id]['tracks'][idx]['track_count'] = len(filepaths)
+
+                bpms = []
+                for fp in filepaths:
+                    bpm = _analyze_bpm(fp)
+                    if bpm is not None:
+                        _embed_bpm(fp, bpm)
+                        bpms.append(bpm)
+
+                with _lock:
+                    t = _jobs[run_id]['tracks'][idx]
+                    t['status'] = 'done'
+                    if bpms:
+                        if len(bpms) == 1:
+                            t['bpm'] = bpms[0]
+                        else:
+                            t['bpm_avg'] = round(sum(bpms) / len(bpms), 1)
+                            t['bpm_count'] = len(filepaths)
             else:
+                with _lock:
+                    _jobs[run_id]['tracks'][idx]['status'] = 'done'
+        else:
+            with _lock:
+                t = _jobs[run_id]['tracks'][idx]
                 t['status'] = 'error'
                 lines = [l.strip() for l in r.stderr.splitlines() if l.strip()]
                 t['error'] = lines[-1] if lines else 'Error desconocido'
@@ -59,34 +112,59 @@ def _render_status(job: dict) -> str:
     for t in job['tracks']:
         url_short = (t['url'][:70] + '...') if len(t['url']) > 70 else t['url']
         s = t['status']
+
         if s == 'pending':
             items.append(
                 f'<li class="tr tr-pending">'
-                f'<span class="tr-label">en cola</span>'
+                f'<div class="tr-head"><span class="tr-label">en cola</span></div>'
                 f'<span class="tr-url">{url_short}</span></li>'
             )
         elif s == 'running':
             items.append(
                 f'<li class="tr tr-running">'
-                f'<span class="tr-label">descargando...</span>'
+                f'<div class="tr-head"><span class="tr-label">descargando...</span></div>'
+                f'<span class="tr-url">{url_short}</span></li>'
+            )
+        elif s == 'analyzing':
+            track_count = t.get('track_count', 1)
+            count_txt = f'{track_count} tracks' if track_count > 1 else '1 track'
+            items.append(
+                f'<li class="tr tr-analyzing">'
+                f'<div class="tr-head">'
+                f'<span class="tr-label">analizando BPM...</span>'
+                f'<span class="bpm-chip bpm-pending">{count_txt}</span>'
+                f'</div>'
                 f'<span class="tr-url">{url_short}</span></li>'
             )
         elif s == 'done':
+            if 'bpm' in t:
+                bpm_html = f'<span class="bpm-chip">{int(t["bpm"])} BPM</span>'
+            elif 'bpm_avg' in t:
+                bpm_html = (
+                    f'<span class="bpm-chip">'
+                    f'{t["bpm_count"]} tracks &middot; avg {int(t["bpm_avg"])} BPM'
+                    f'</span>'
+                )
+            else:
+                bpm_html = ''
             items.append(
                 f'<li class="tr tr-done">'
+                f'<div class="tr-head">'
                 f'<span class="tr-label">listo</span>'
+                f'{bpm_html}'
+                f'</div>'
                 f'<span class="tr-url">{url_short}</span></li>'
             )
         else:
             items.append(
                 f'<li class="tr tr-error">'
-                f'<span class="tr-label">error</span>'
+                f'<div class="tr-head"><span class="tr-label">error</span></div>'
                 f'<span class="tr-url">{url_short}</span>'
                 f'<span class="tr-err">{t["error"]}</span></li>'
             )
     return (
         '<div class="status-box">'
-        '<p class="status-head">Cola de descargas - Música/DiscoDownload</p>'
+        '<p class="status-head">Cola de descargas &mdash; Música/DiscoDownload</p>'
         f'<ul class="tr-list">{"".join(items)}</ul>'
         '</div>'
     )
@@ -112,6 +190,7 @@ HTML = '''<!DOCTYPE html>
   --gold-dark:#7A5F00;
   --crimson:#8B0000;
   --silver:#C0C0C0;
+  --lavender:#c084fc;
   --bg:#08000F;
   --text:#FFF5E0;
 }
@@ -313,14 +392,39 @@ button[type="submit"]:focus-visible{outline:2px solid var(--pink);outline-offset
   font-family:'Courier New',monospace;font-size:.82rem;
 }
 .tr:last-child{border-bottom:none}
-.tr-label{font-size:.68rem;letter-spacing:.18em;text-transform:uppercase;opacity:.65}
+
+/* label + bpm chip on one line */
+.tr-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+
+.tr-label{font-size:.68rem;letter-spacing:.18em;text-transform:uppercase;opacity:.65;flex-shrink:0}
 .tr-url{opacity:.8;word-break:break-all;line-height:1.4}
 .tr-err{font-size:.78rem;color:var(--pink);opacity:.9;margin-top:1px}
 
-.tr-pending{color:var(--silver);opacity:.55}
-.tr-running{color:var(--gold);animation:trpulse 1.1s ease-in-out infinite alternate}
-.tr-done   {color:#00e5a0}
-.tr-error  {color:var(--pink)}
+/* ── BPM chip ── */
+.bpm-chip{
+  font-family:'Courier New',monospace;font-size:.72rem;letter-spacing:.14em;
+  color:var(--gold);background:rgba(255,215,0,.07);
+  border:1px solid rgba(255,215,0,.32);border-radius:2px;
+  padding:2px 8px;white-space:nowrap;flex-shrink:0;
+  text-shadow:0 0 8px rgba(255,215,0,.45);
+}
+/* analyzing variant — purple tones, pulsing */
+.bpm-chip.bpm-pending{
+  color:var(--lavender);
+  background:rgba(192,132,252,.07);
+  border-color:rgba(192,132,252,.28);
+  text-shadow:0 0 8px rgba(192,132,252,.4);
+  animation:chipulse .9s ease-in-out infinite alternate;
+}
+@keyframes chipulse{0%{opacity:.55}100%{opacity:1}}
+
+/* ── Row state colours ── */
+.tr-pending  {color:var(--silver);opacity:.55}
+.tr-running  {color:var(--gold);animation:trpulse 1.1s ease-in-out infinite alternate}
+.tr-analyzing{color:var(--lavender)}
+.tr-analyzing .tr-label{animation:trpulse 1.1s ease-in-out infinite alternate}
+.tr-done     {color:#00e5a0}
+.tr-error    {color:var(--pink)}
 
 @keyframes trpulse{0%{opacity:.65}100%{opacity:1}}
 
@@ -343,7 +447,7 @@ button[type="submit"]:focus-visible{outline:2px solid var(--pink);outline-offset
   h1{font-size:clamp(1.7rem,9vw,2.4rem)}
 }
 @media(prefers-reduced-motion:reduce){
-  .rays,.ball,.orb,body,h1,.tr-running{animation:none!important}
+  .rays,.ball,.orb,body,h1,.tr-running,.tr-analyzing,.bpm-chip.bpm-pending{animation:none!important}
   .ball{background-position:0 0,0 0,0 0}
 }
 </style>
@@ -453,10 +557,11 @@ def home():
         with _lock:
             raw = _jobs.get(run_id)
             if raw:
-                # shallow copy so we release the lock before rendering
                 job = {'tracks': [dict(t) for t in raw['tracks']], 'fmt': raw['fmt']}
 
-    still_running = job and any(t['status'] in ('pending', 'running') for t in job['tracks'])
+    still_running = job and any(
+        t['status'] in ('pending', 'running', 'analyzing') for t in job['tracks']
+    )
     auto_refresh  = '<meta http-equiv="refresh" content="2">' if still_running else ''
     status_block  = _render_status(job) if job else ''
 

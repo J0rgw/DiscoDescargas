@@ -9,5 +9,5 @@ echo  Abre tu navegador en: http://localhost:5555
 echo  Para parar el servidor pulsa Ctrl+C
 echo.
 cd /d "%~dp0"
-uv run --with flask ytweb.py
+uv run --with flask --with librosa --with mutagen ytweb.py
 pause
