@@ -21,7 +21,7 @@ Flask, librosa (detección de BPM) y mutagen (escritura de etiquetas) **los inst
 
 ---
 
-## Paso 1 — Abre PowerShell como administrador
+## Paso 1 Abre PowerShell como administrador
 
 1. Pulsa la tecla **Windows** y escribe `PowerShell`
 2. Haz **clic derecho** sobre "Windows PowerShell" y selecciona **Ejecutar como administrador**
@@ -31,7 +31,7 @@ Deja esa ventana abierta. Vamos a usarla mucho.
 
 ---
 
-## Paso 2 — Instala uv
+## Paso 2 Instala uv
 
 Copia este comando, pégalo en PowerShell y pulsa **Enter**:
 
@@ -43,7 +43,7 @@ Verás texto moviéndose. Cuando pare y vuelva a aparecer el cursor, **cierra Po
 
 ---
 
-## Paso 3 — Instala ffmpeg
+## Paso 3 Instala ffmpeg
 
 **ffmpeg** es el que convierte el audio. Sin él, los archivos salen en formato raro en vez de MP3 o WAV.
 
@@ -59,7 +59,7 @@ Si te pide confirmación, escribe `Y` y pulsa Enter. Espera a que termine.
 
 ---
 
-## Paso 4 — Instala yt-dlp
+## Paso 4 Instala yt-dlp
 
 ```
 uv tool install yt-dlp
